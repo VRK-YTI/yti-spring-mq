@@ -1,0 +1,115 @@
+buildscript {
+    repositories {
+        jcenter()
+    }
+    dependencies {
+        classpath("org.springframework.boot:spring-boot-gradle-plugin:1.5.1.RELEASE")
+        classpath(group: 'org.jfrog.buildinfo', name: 'build-info-extractor-gradle', version: '3.2.0')
+        classpath('pl.allegro.tech.build:axion-release-plugin:1.8.1')
+    }
+}
+
+apply plugin: 'pl.allegro.tech.build.axion-release'
+apply plugin: 'com.jfrog.artifactory'
+apply plugin: 'maven-publish'
+apply plugin: 'org.springframework.boot'
+apply plugin: 'java'
+apply plugin: 'idea'
+
+jar {
+    baseName = 'yti-spring-mq'
+}
+
+scmVersion {
+    tag {
+        prefix = "v"
+        versionSeparator = ""
+    }
+}
+
+project.version = scmVersion.version
+
+task sourceJar(type: Jar) {
+    from sourceSets.main.allJava
+}
+
+repositories {
+    mavenLocal()
+    jcenter()
+    // put your artifactory parameters to $HOME/.gradle/gradle.properties
+    if (project.hasProperty('artifactoryUrl')) {
+        maven {
+            url "$artifactoryUrl"
+            credentials {
+                username "$artifactoryUsername"
+                password "$artifactoryPassword"
+            }
+        }
+    }    
+}
+
+sourceCompatibility = 1.8
+targetCompatibility = 1.8
+
+ext {
+    springVersion = '4.2.3.RELEASE'
+}
+
+publishing {
+    publications {
+        maven(MavenPublication) {
+            groupId 'fi.vm.yti'
+            artifactId 'yti-spring-mq'
+            version project.version
+
+            pom.withXml {
+                asNode().appendNode('description', 'Common spring MQ configuration')
+            }
+            artifact jar
+            artifact sourceJar {
+                classifier "sources"
+            }
+        }
+    }
+}
+
+artifactory {
+    publish {
+        defaults {
+            publications('maven')
+            publishArtifacts = true
+            publishPom = true
+        }
+    }
+}
+
+dependencies {
+    compile "javax.servlet:javax.servlet-api:3.1.0"
+    compile "com.fasterxml.jackson.core:jackson-databind:2.8.6"
+    compile "org.springframework.security:spring-security-core:$springVersion"
+    compile "org.springframework.security:spring-security-config:$springVersion"
+    compile "org.springframework.security:spring-security-web:$springVersion"
+    compile "org.apache.httpcomponents:httpclient:4.5.3"
+    compile "com.google.code.findbugs:jsr305:3.0.2"
+    compile "org.jetbrains:annotations:15.0"
+
+    compile "fi.vm.yti:yti-spring-security:0.1.1"
+
+    compile("org.springframework.boot:spring-boot-starter-activemq")
+    compile("org.apache.activemq:activemq-broker")
+}
+
+
+springBoot {
+    executable = true
+    backupSource = false
+}
+
+bootRun {
+    systemProperties System.properties
+    jvmArgs = ["-Dspring.output.ansi.enabled=ALWAYS"]
+}
+
+bootRepackage {
+    mainClass = 'fi.vm.yti.mq.Application'
+}
