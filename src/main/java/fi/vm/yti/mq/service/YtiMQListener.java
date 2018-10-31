@@ -16,20 +16,18 @@ import javax.jms.JMSException;
 import javax.jms.Session;
 
 @Component
-public class JmsMQListener {
+public class YtiMQListener {
     private final String subSystem;
-    private final String incomingQueue;
 
     // JMS-client
     @Autowired
     private JmsMessagingTemplate jmsMessagingTemplate;
 
     @Autowired
-    public JmsMQListener(JmsMessagingTemplate jmsMessagingTemplate,
-                      @Value("${mq.active.subsystem}") String subSystem) {
+    public YtiMQListener(JmsMessagingTemplate jmsMessagingTemplate,
+                         @Value("${mq.active.subsystem}") String subSystem) {
         this.jmsMessagingTemplate = jmsMessagingTemplate;
         this.subSystem = subSystem;
-        this.incomingQueue = subSystem+"Incoming";
     }
 
     /**
@@ -55,13 +53,6 @@ public class JmsMQListener {
         Message mess = MessageBuilder
                 .withPayload("Processing " + uri)
                 .setHeaders(accessor)
-/*                // Authenticated user
-                .setHeader("userId", userId)
-                // Token which is used when querying status
-                .setHeader("jobtoken", jobtoken)
-                .setHeader("subsystem", subSystem)
-                .setHeader("uri", uri)
-                */
                 .build();
         jmsMessagingTemplate.send(subSystem+"Status", mess);
         return message;
