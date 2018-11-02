@@ -55,11 +55,20 @@ public class YtiMQService {
         this.jmsMessagingTemplate = jmsMessagingTemplate;
         this.subSystem = subSystem;
         // Initialize topic connection
-        jmsTopicClient = new JmsMessagingTemplate(jmsMessagingTemplate.getConnectionFactory());
-        jmsTopicClient.getJmsTemplate().setPubSubDomain(true);
+//        jmsTopicClient = new JmsMessagingTemplate(jmsMessagingTemplate.getConnectionFactory());
+//        jmsTopicClient.getJmsTemplate().setPubSubDomain(true);
     }
 
     public HttpStatus getStatus(UUID jobtoken){
+
+        System.out.println("IncomingQueue!");
+        browseQueue(subSystem+"Incoming");
+        System.out.println("StatusQueue!");
+        browseQueue(subSystem+"Status");
+        System.out.println("ProcessingQueue!");
+        browseQueue(subSystem+"Processing");
+        System.out.println("ReadyQueue!");
+        browseQueue(subSystem+"Ready");
         // Status not_found/running/errors
         Message mess = currentStatus.get(jobtoken.toString());
         if(mess!=null) {
@@ -75,7 +84,13 @@ public class YtiMQService {
                 case YtiMQService.STATUS_PROCESSING:{
                     if(logger.isDebugEnabled())
                         logger.debug("Processing "+jobtoken);
-                    return HttpStatus.PROCESSING;
+                    System.out.println("Timestamp="+(long)mess.getHeaders().get("timestamp"));
+                    long expirationtime=System.currentTimeMillis() - (long)mess.getHeaders().get("timestamp");
+                    System.out.println("current_time-stamp="+expirationtime);
+                    if( expirationtime > 30 * 1000) {
+                        return HttpStatus.OK;
+                    } else
+                        return HttpStatus.PROCESSING;
                 }
                 case YtiMQService.STATUS_PREPROCESSING:{
                     logger.warn("Import operation already started for "+jobtoken);
@@ -107,14 +122,14 @@ public class YtiMQService {
 
     public HttpStatus getStatus(UUID jobtoken, StringBuffer payload){
         // Status not_found/running/errors
-        System.out.println("CurrentStatus for given jobtoken:"+currentStatus.get(jobtoken.toString()));
+        System.out.println("Current Status for given jobtoken:"+currentStatus.get(jobtoken.toString()));
         // Query status information from ActiveMQ
         System.out.println("getStatus with payload:");
         Message mess = currentStatus.get(jobtoken.toString());
         if(mess!=null) {
             // return also payload
             payload.append(mess.getPayload());
-            System.out.println("CurrentStatus for given jobtoken:" + mess.getPayload().toString());
+            System.out.println("Current Status for given jobtoken:" + mess.getPayload().toString());
             int status=(int)mess.getHeaders().get("status");
             switch(status){
                 case YtiMQService.STATUS_READY:{
@@ -126,7 +141,13 @@ public class YtiMQService {
                 case YtiMQService.STATUS_PROCESSING:{
                     if(logger.isDebugEnabled())
                         logger.debug("Processing "+jobtoken);
-                    return HttpStatus.PROCESSING;
+                    System.out.println("Timestamp="+(long)mess.getHeaders().get("timestamp"));
+                    long expirationtime=System.currentTimeMillis() - (long)mess.getHeaders().get("timestamp");
+                    System.out.println("current_time-stamp="+expirationtime);
+                    if( expirationtime > 60 * 1000) {
+                        return HttpStatus.OK;
+                    } else
+                        return HttpStatus.PROCESSING;
                 }
                 case YtiMQService.STATUS_PREPROCESSING:{
                     logger.warn("Import operation already started for "+jobtoken);
@@ -174,6 +195,32 @@ public class YtiMQService {
 
     public boolean checkIfImportIsRunning(String uri) {
         Boolean rv = false;
+        // Check cached status first running if not ready
+        Message mess = currentStatus.get(uri);
+        if(mess!=null){
+            int status = (int)mess.getHeaders().get("status");
+            System.out.println("YtiMQService checkIfImportIsRunning using cached state:"+status+"\n"+mess);
+            if(status == YtiMQService.STATUS_PROCESSING || status == YtiMQService.STATUS_PREPROCESSING) {
+                System.out.println("Timestamp="+(long)mess.getHeaders().get("timestamp"));
+                long expirationtime=System.currentTimeMillis() - (long)mess.getHeaders().get("timestamp");
+                System.out.println("current_time-stamp="+expirationtime);
+                rv =true;
+                if( expirationtime > 60 * 1000) {
+                    System.out.println("Expired!!!!");
+                    // Hardcoded expiration time 60 sec
+//                    rv = true;
+                    // cached item expired, clean it
+                    currentStatus.remove(uri);
+                    currentStatus.remove((String)mess.getHeaders().get("jobtoken"));
+                    rv = false;
+                }
+            }
+            // Cache found, use it
+            return rv;
+        }
+        else
+            System.out.println("Not cached item found for "+uri);
+        // Check queues
         if (checkUriStatus(uri, subSystem+"Processing")) {
                 rv = true;
         } //else if (checkUriStatus(uri, subSystem+"Status")) {
@@ -188,6 +235,7 @@ public class YtiMQService {
             @Override
             public Boolean doInJms(Session session, QueueBrowser browser) throws JMSException {
                 Enumeration messages = browser.getEnumeration();
+                System.out.println("checkUriStatus "+uri+" Queue:"+queueName+" status="+messages.hasMoreElements());
                 return  messages.hasMoreElements();
             }
         });
@@ -208,6 +256,22 @@ public class YtiMQService {
                 }
                 return  rv;
             }
+        });
+    }
+
+    public String browseQueue(String queue) {
+        return jmsMessagingTemplate.getJmsTemplate().browse(queue, (session, browser) -> {
+            Enumeration<?> messages = browser.getEnumeration();
+            int total = 0;
+            while (messages.hasMoreElements()) {
+                javax.jms.Message m = (javax.jms.Message)messages.nextElement();
+                if (m instanceof TextMessage) {
+                    TextMessage message = (TextMessage) m;
+                    System.out.println(" browse message="+message);
+                }
+                total++;
+            }
+            return String.format("Total '%d elements waiting in %s", total, queue);
         });
     }
 
@@ -279,11 +343,12 @@ public class YtiMQService {
         }
 
         // Check uri
+        /*
         if(checkIfImportIsRunning(uri)){
             logger.error("Import running for URI:<" + uri + ">");
             return  HttpStatus.CONFLICT.value();
         }
-
+*/
         // If jobtoken is not set, create new one
         if(jobtoken == null)
             jobtoken=UUID.randomUUID();
@@ -308,7 +373,7 @@ public class YtiMQService {
                     .build();
             // send item for processing
         System.out.println("Send job:"+jobtoken+" to the processing queue:"+subsystem+"Incoming");
-            jmsMessagingTemplate.send(subsystem+"Incoming", mess);
+        jmsMessagingTemplate.send(subsystem+"Incoming", mess);
         return  HttpStatus.OK.value();
     }
 
@@ -397,8 +462,12 @@ public class YtiMQService {
                         .build();
             }
             // send new replacing iten to Status-queue
-            if(mess != null)
+            if(mess != null) {
                 jmsMessagingTemplate.send(subSystem + "Status", mess);
+                // Update status cache
+                currentStatus.put(jobtoken, mess);
+                currentStatus.put(uri, mess);
+            }
         } catch (JMSException jex) {
             jex.printStackTrace();
         }
@@ -434,14 +503,18 @@ public class YtiMQService {
         if(mess != null) {
             System.out.println("Send status message to queue:");
             jmsMessagingTemplate.send(subSystem + "Status", mess);
-            jmsTopicClient.send(subSystem + "StatusTopic", mess);
+            // Update internal cache
+            currentStatus.put(jobtoken, mess);
+            currentStatus.put(uri, mess);
+
+//            jmsTopicClient.send(subSystem + "StatusTopic", mess);
         }
     }
 
     /**
      * Update status information state machine
      */
-    @JmsListener(destination = "${mq.active.subsystem}StatusTopic")
+//    @JmsListener(destination = "${mq.active.subsystem}StatusTopic")
     public void receiveTopicMessage(final Message message,
                                     Session session,
                                     @Header String jobtoken,
@@ -450,7 +523,9 @@ public class YtiMQService {
         System.out.println("Received Status-Message: headers=" + message.getHeaders());
 
         System.out.println("received <" + message.getPayload().toString() + ">");
-        this.currentStatus.put(jobtoken, message);
+        // Use jobid or uri as a key
+        currentStatus.put(jobtoken, message);
+        currentStatus.put(uri, message);
     }
 }
 
