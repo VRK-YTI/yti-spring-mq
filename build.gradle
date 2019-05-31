@@ -9,6 +9,11 @@ buildscript {
     }
 }
 
+plugins {
+    id "org.sonarqube" version "2.6.2"
+    id "org.owasp.dependencycheck" version "4.0.2"
+}
+
 apply plugin: 'pl.allegro.tech.build.axion-release'
 apply plugin: 'com.jfrog.artifactory'
 apply plugin: 'maven-publish'
@@ -112,4 +117,24 @@ bootRun {
 
 bootRepackage {
     mainClass = 'fi.vm.yti.mq.Application'
+}
+
+sonarqube {
+    properties {
+        property "sonar.projectKey", "yti-spring-mq"
+        property "sonar.projectName", "yti-spring-mq"
+        property("sonar.dependencyCheck.reportPath", "$buildDir/reports/dependency-check-report.xml")
+        property("sonar.dependencyCheck.htmlReportPath", "$buildDir/reports/dependency-check-report.html")
+    }
+}
+
+dependencyCheck {
+    format = 'ALL'
+    autoUpdate = false
+    analyzers {
+        centralEnabled = false
+    }
+    data {
+        directory = System.getenv('OWASP_DATA_DIR')
+    }
 }
