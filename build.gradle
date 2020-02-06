@@ -104,8 +104,10 @@ dependencies {
 
     compile "fi.vm.yti:yti-spring-security:0.1.8"
 
-    compile("org.springframework.boot:spring-boot-starter-activemq")
-    compile("org.apache.activemq:activemq-broker")
+    compile 'org.springframework.boot:spring-boot-starter-activemq'
+    compile 'org.apache.activemq:activemq-broker'
+    compile 'com.github.ben-manes.caffeine:caffeine:2.8.1'
+
 }
 
 
@@ -125,8 +127,8 @@ bootRepackage {
 
 sonarqube {
     properties {
-        property "sonar.projectKey", "yti-spring-mq"
-        property "sonar.projectName", "yti-spring-mq"
+        property "sonar.projectKey", "yti-terminology-api"
+        property "sonar.projectName", "yti-terminology-api"
         property("sonar.dependencyCheck.reportPath", "$buildDir/reports/dependency-check-report.xml")
         property("sonar.dependencyCheck.htmlReportPath", "$buildDir/reports/dependency-check-report.html")
     }
