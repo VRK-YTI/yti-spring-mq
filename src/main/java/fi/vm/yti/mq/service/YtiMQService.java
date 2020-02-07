@@ -8,13 +8,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.jms.annotation.EnableJms;
 import org.springframework.jms.annotation.JmsListener;
-import org.springframework.jms.core.BrowserCallback;
 import org.springframework.jms.core.JmsMessagingTemplate;
-import org.springframework.jms.core.JmsTemplate;
 import org.springframework.messaging.Message;
-import org.springframework.messaging.MessageHeaders;
 import org.springframework.messaging.handler.annotation.Header;
-import org.springframework.messaging.handler.annotation.Headers;
 import org.springframework.messaging.handler.annotation.SendTo;
 import org.springframework.messaging.support.MessageBuilder;
 import org.springframework.messaging.support.MessageHeaderAccessor;
@@ -52,7 +48,8 @@ public class YtiMQService {
     // key(token as UUID or uri), message pauload as String)
 
     // Cache containing key,payload as JMS message
-    Cache<String, Message> statusCache = Caffeine.newBuilder().expireAfterWrite(10, TimeUnit.MINUTES).maximumSize(500).build(); 
+//    Cache<String, Message> statusCache = Caffeine.newBuilder().expireAfterWrite(5, TimeUnit.MINUTES).maximumSize(500).build(); 
+    Cache<String, Message> statusCache = Caffeine.newBuilder().expireAfterWrite(10, TimeUnit.SECONDS).maximumSize(500).build(); 
 
     @Autowired
     public YtiMQService(AuthenticatedUserProvider userProvider,
@@ -66,6 +63,19 @@ public class YtiMQService {
         jmsTopicClient = new JmsMessagingTemplate(jmsMessagingTemplate.getConnectionFactory());
         jmsTopicClient.getJmsTemplate().setPubSubDomain(true);
     }
+
+    public void removeStatusMessage(String uri) {
+        // Use jobid or uri as a key
+        logger.info("Removing status cache with "+ uri );
+        statusCache.invalidate(uri);
+    }
+
+    public void removeStatusMessage(UUID token) {
+        // Use jobid or uri as a key
+        logger.info("Removing status cache with "+ token );
+        statusCache.invalidate(token);
+    }
+
 
     /**
      * State-handler queue, just receive and update internal cache
@@ -164,11 +174,12 @@ public class YtiMQService {
 
     public boolean checkIfImportIsRunning(String uri) {
         Boolean rv = false;
+        logger.info("checkIfImport running for:"+uri);
         // Check cached status first running if not ready
         Message mess = statusCache.getIfPresent(uri);
         if(mess!=null){
             int status = (int)mess.getHeaders().get("status");
-            System.out.println("YtiMQService checkIfImportIsRunning using cached state:"+status+"\n"+mess);
+            logger.info("checkIfImportIsRunning found uri with state:"+status+"\n"+mess);
             if(status == YtiMQService.STATUS_PROCESSING || status == YtiMQService.STATUS_PREPROCESSING) {
                 System.out.println("Timestamp="+(long)mess.getHeaders().get("timestamp"));
                 rv =true;
@@ -191,7 +202,7 @@ public class YtiMQService {
         }
 
         // Check uri
-        /*
+/*        
         if(checkIfImportIsRunning(uri)){
             logger.error("Import running for URI:<" + uri + ">");
             return  HttpStatus.CONFLICT.value();
@@ -206,7 +217,10 @@ public class YtiMQService {
             accessor.copyHeaders(headers.toMap());
         }
         // Authenticated user
-        accessor.setHeader("userId",  userProvider.getUser().getId().toString());
+        System.out.println("UserProvider="+userProvider+" user="+userProvider.getUser());
+        String userId = userProvider.getUser().getId() != null ? userProvider.getUser().getId().toString(): "00000000-0000-0000-0000-000000000000";
+        accessor.setHeader("userId",  userId);
+
         // Token which is used when querying status
         accessor.setHeader("jobtoken", jobtoken.toString());
         // Target identification data
@@ -236,8 +250,8 @@ public class YtiMQService {
                                     @Header String uri)  throws JMSException {
         System.out.println("Received Status-Message: headers=" + message.getHeaders());
 
-        System.out.println("received <" + message.getPayload().toString() + ">");
         // Use jobid or uri as a key
+        logger.info("Updating status cache with "+jobtoken + " and" + uri );
         statusCache.put(jobtoken, message);
         statusCache.put(uri, message);
     }
@@ -274,6 +288,13 @@ public class YtiMQService {
                 System.out.println("SEND set STATUS:"+mess);
             }
         }
+        this.statusCache.invalidate(jobtoken);
+        this.statusCache.invalidate(uri);
         return mess;
     }    
+
+    public void viewStatus(){
+        Map<String, Message> items = statusCache.asMap();
+        System.out.println("status keys="+items.keySet());
+    }
 }
