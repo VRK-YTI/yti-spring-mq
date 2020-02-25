@@ -33,7 +33,7 @@ public class YtiMQService {
 
     private static final Logger logger = LoggerFactory.getLogger(YtiMQService.class);
 
-    public static final String[] SET_VALUES = new String[] { "Vocabulary", "Test", "CodeList" };
+    public static final String[] SET_VALUES = new String[] { "Terminology", "Test", "CodeList" };
     public static final Set<String> SUPPORTED_SYSTEMS = new HashSet<>(Arrays.asList(SET_VALUES));
 
     // JMS-client
@@ -47,9 +47,13 @@ public class YtiMQService {
 
     // key(token as UUID or uri), message pauload as String)
 
+    // Add followiing into the using appöication.properties
+    // spring.cache.cache-names: Terminology
+    // spring.cache.caffeine.spec: maximumSize=100, expireAfterAccess=30s
+
     // Cache containing key,payload as JMS message
 //    Cache<String, Message> statusCache = Caffeine.newBuilder().expireAfterWrite(5, TimeUnit.MINUTES).maximumSize(500).build(); 
-    Cache<String, Message> statusCache = Caffeine.newBuilder().expireAfterWrite(10, TimeUnit.SECONDS).maximumSize(500).build(); 
+    Cache<String, Message> statusCache = Caffeine.newBuilder().build(); 
 
     @Autowired
     public YtiMQService(AuthenticatedUserProvider userProvider,
@@ -88,10 +92,12 @@ public class YtiMQService {
     @SendTo("${mq.active.subsystem}Processing")
     public Message receiveMessage(final Message message,
                                   Session session,
-                                  @Header String jobtoken,
+                                  @Header("jobtoken") String jobtoken,
                                   @Header String userId,
                                   @Header String uri) throws JMSException {
-        System.out.println("Received and transferred to processing. Message headers=" + message.getHeaders());
+        if(logger.isDebugEnabled()){
+            logger.debug("Received and transferred to processing. Message headers=" + message.getHeaders());
+        }
         MessageHeaderAccessor accessor = new MessageHeaderAccessor();
         accessor.copyHeaders(message.getHeaders());
         accessor.setLeaveMutable(true);
@@ -142,14 +148,16 @@ public class YtiMQService {
 
     public HttpStatus getStatus(UUID jobtoken, StringBuffer payload){
         // Status not_found/running/errors
-        System.out.println("Current Status for given jobtoken:"+statusCache.getIfPresent(jobtoken.toString()));
+        logger.info("Current Status for given jobtoken:"+statusCache.getIfPresent(jobtoken.toString()));
         // Query status information from ActiveMQ
         System.out.println("getStatus with payload:");
         Message mess = statusCache.getIfPresent(jobtoken.toString());
         if(mess!=null) {
             // return also payload
             payload.append(mess.getPayload());
-            System.out.println("Current Status for given jobtoken:" + mess.getPayload().toString());
+            if(logger.isDebugEnabled()){
+                logger.debug("Get Current Status for given jobtoken:" + mess.getPayload().toString());
+            }
             int status=(int)mess.getHeaders().get("status");
             switch(status){
                 case YtiMQService.STATUS_READY:{
@@ -169,12 +177,27 @@ public class YtiMQService {
                 }
             }
         }
+        if(logger.isDebugEnabled()){
+            Map<String,Message> map = statusCache.asMap();
+            Set<String> keys=map.keySet();
+            keys.forEach(k-> {
+                System.out.println("KEY="+k);
+            });
+        }
         return  HttpStatus.NO_CONTENT;
     }
 
     public boolean checkIfImportIsRunning(String uri) {
         Boolean rv = false;
         logger.info("checkIfImport running for:"+uri);
+//        if(logger.isDebugEnabled()){
+            Map<String,Message> map = statusCache.asMap();
+            Set<String> keys=map.keySet();
+            keys.forEach(k-> {
+                System.out.println("KEY="+k);
+            });
+//        }
+
         // Check cached status first running if not ready
         Message mess = statusCache.getIfPresent(uri);
         if(mess!=null){
@@ -234,7 +257,9 @@ public class YtiMQService {
                     .setHeaders(accessor)
                     .build();
             // send item for processing
-        System.out.println("Send job:"+jobtoken+" to the processing queue:"+subsystem+"Incoming");
+        if(logger.isDebugEnabled()){
+            logger.debug("Send job:"+jobtoken+" to the processing queue:"+subsystem+"Incoming");
+        }
         jmsMessagingTemplate.send(subsystem+"Incoming", mess);
         return  HttpStatus.OK.value();
     }
@@ -245,13 +270,15 @@ public class YtiMQService {
     @JmsListener(destination = "${mq.active.subsystem}Status")
     public void receiveStatusMessage(final Message message,
                                     Session session,
-                                    @Header String jobtoken,
-                                    @Header String userId,
-                                    @Header String uri)  throws JMSException {
-        System.out.println("Received Status-Message: headers=" + message.getHeaders());
-
+                                    @Header("jobtoken") String jobtoken,
+                                    @Header("userId") String userId,
+                                    @Header("uri") String uri)
+                                    throws JMSException {
+        if(logger.isDebugEnabled()){
+            logger.debug("Received Status-Message: headers=" + message.getHeaders());
+        }
         // Use jobid or uri as a key
-        logger.info("Updating status cache with "+jobtoken + " and" + uri );
+        logger.info("Updating status cache with "+jobtoken + " and " + uri +" using status:"+message.getHeaders().get("status"));
         statusCache.put(jobtoken, message);
         statusCache.put(uri, message);
     }
@@ -285,16 +312,16 @@ public class YtiMQService {
             }
             jmsMessagingTemplate.send(subSystem + "Status", mess);
             if(logger.isDebugEnabled()){
-                System.out.println("SEND set STATUS:"+mess);
+                logger.debug("SEND set STATUS:"+mess);
             }
         }
-        this.statusCache.invalidate(jobtoken);
-        this.statusCache.invalidate(uri);
         return mess;
     }    
 
     public void viewStatus(){
         Map<String, Message> items = statusCache.asMap();
-        System.out.println("status keys="+items.keySet());
+        if(logger.isDebugEnabled()){
+            logger.debug("status keys="+items.keySet());
+        }
     }
 }
