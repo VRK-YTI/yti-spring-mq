@@ -114,6 +114,7 @@ dependencies {
 springBoot {
     executable = true
     backupSource = false
+    mainClass = 'fi.vm.yti.mq.service.YtiMQService.java'
 }
 
 bootRun {
@@ -122,7 +123,6 @@ bootRun {
 }
 
 bootRepackage {
-    mainClass = 'fi.vm.yti.mq.Application'
 }
 
 sonarqube {
